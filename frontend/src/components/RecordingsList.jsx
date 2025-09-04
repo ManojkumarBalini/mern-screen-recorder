@@ -1,40 +1,52 @@
-// RecordingsList.jsx
 import React, { useState, useEffect } from 'react';
 
-const RecordingsList = () => {
+const RecordingsList = ({ apiUrl }) => {
   const [recordings, setRecordings] = useState([]);
   const [activeTab, setActiveTab] = useState('my-recordings');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    // Simulate loading recordings
-    setTimeout(() => {
-      setRecordings([
-        {
-          id: 1,
-          filename: 'presentation-recording.webm',
-          createdAt: '2023-06-15T14:30:00Z',
-          filesize: 4500000,
-          duration: '02:45'
-        },
-        {
-          id: 2,
-          filename: 'tutorial.mp4',
-          createdAt: '2023-06-10T09:15:00Z',
-          filesize: 12560000,
-          duration: '05:22'
-        },
-        {
-          id: 3,
-          filename: 'meeting-recording.webm',
-          createdAt: '2023-06-05T16:45:00Z',
-          filesize: 8910000,
-          duration: '03:18'
-        }
-      ]);
-      setLoading(false);
-    }, 1000);
+    fetchRecordings();
   }, []);
+
+  const fetchRecordings = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${apiUrl}/api/recordings`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRecordings(data);
+        setError('');
+      } else {
+        setError('Failed to fetch recordings');
+      }
+    } catch (error) {
+      console.error('Error fetching recordings:', error);
+      setError('Error connecting to server');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteRecording = async (id) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/recordings/${id}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        // Remove from local state
+        setRecordings(recordings.filter(rec => rec.id !== id));
+      } else {
+        alert('Failed to delete recording');
+      }
+    } catch (error) {
+      console.error('Error deleting recording:', error);
+      alert('Error deleting recording');
+    }
+  };
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
@@ -47,6 +59,13 @@ const RecordingsList = () => {
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDuration = (seconds) => {
+    if (!seconds) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -77,6 +96,17 @@ const RecordingsList = () => {
         <div className="flex justify-center items-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
         </div>
+      ) : error ? (
+        <div className="text-center py-12 text-red-400">
+          <i className="fas fa-exclamation-triangle text-3xl mb-3"></i>
+          <p>{error}</p>
+          <button 
+            onClick={fetchRecordings}
+            className="mt-4 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"
+          >
+            Try Again
+          </button>
+        </div>
       ) : recordings.length > 0 ? (
         <div className="overflow-x-auto rounded-lg">
           <table className="w-full">
@@ -100,16 +130,27 @@ const RecordingsList = () => {
                   </td>
                   <td className="py-4 px-4">{formatDate(recording.createdAt)}</td>
                   <td className="py-4 px-4">{formatFileSize(recording.filesize)}</td>
-                  <td className="py-4 px-4">{recording.duration}</td>
+                  <td className="py-4 px-4">{formatDuration(recording.duration)}</td>
                   <td className="py-4 px-4 text-right">
                     <div className="flex justify-end space-x-2">
-                      <button className="p-2 text-blue-400 hover:text-blue-300 transition-colors">
+                      <a
+                        href={`${apiUrl}/api/recordings/${recording.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 text-blue-400 hover:text-blue-300 transition-colors"
+                      >
                         <i className="fas fa-play"></i>
-                      </button>
-                      <button className="p-2 text-green-400 hover:text-green-300 transition-colors">
+                      </a>
+                      <a
+                        href={`${apiUrl}/api/recordings/${recording.id}/download`}
+                        className="p-2 text-green-400 hover:text-green-300 transition-colors"
+                      >
                         <i className="fas fa-download"></i>
-                      </button>
-                      <button className="p-2 text-red-400 hover:text-red-300 transition-colors">
+                      </a>
+                      <button 
+                        onClick={() => deleteRecording(recording.id)}
+                        className="p-2 text-red-400 hover:text-red-300 transition-colors"
+                      >
                         <i className="fas fa-trash"></i>
                       </button>
                     </div>
