@@ -3,9 +3,20 @@ const multer = require('multer');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Middleware
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.FRONTEND_URL 
+    : 'http://localhost:3000',
+  credentials: true
+}));
+app.use(express.json());
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -13,30 +24,14 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// Initialize SQLite database
-const db = new sqlite3.Database(path.join(__dirname, 'database.db'));
-
-// Create recordings table if it doesn't exist
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS recordings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      filename TEXT NOT NULL,
-      filepath TEXT NOT NULL,
-      filesize INTEGER NOT NULL,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-});
-
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'recording-' + uniqueSuffix + '.webm');
+    const uniqueName = `${uuidv4()}-${Date.now()}.webm`;
+    cb(null, uniqueName);
   }
 });
 
@@ -47,16 +42,25 @@ const upload = multer({
   }
 });
 
-// Middleware
-app.use(express.json());
-app.use(express.static('uploads'));
+// Initialize SQLite database
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/data/database.db' 
+  : path.join(__dirname, 'database.db');
 
-// CORS middleware
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  next();
+const db = new sqlite3.Database(dbPath);
+
+// Create recordings table if it doesn't exist
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS recordings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL,
+      filepath TEXT NOT NULL,
+      filesize INTEGER NOT NULL,
+      duration INTEGER,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 });
 
 // Routes
@@ -66,14 +70,15 @@ app.post('/api/recordings', upload.single('video'), (req, res) => {
   }
 
   const { filename, path: filepath, size } = req.file;
+  const { duration } = req.body;
   
   // Save to database
   const stmt = db.prepare(`
-    INSERT INTO recordings (filename, filepath, filesize) 
-    VALUES (?, ?, ?)
+    INSERT INTO recordings (filename, filepath, filesize, duration) 
+    VALUES (?, ?, ?, ?)
   `);
   
-  stmt.run(filename, filepath, size, function(err) {
+  stmt.run(filename, filepath, size, duration, function(err) {
     if (err) {
       console.error('Error saving recording to database:', err);
       return res.status(500).json({ error: 'Failed to save recording' });
@@ -86,6 +91,7 @@ app.post('/api/recordings', upload.single('video'), (req, res) => {
         filename,
         filepath,
         filesize: size,
+        duration,
         createdAt: new Date().toISOString()
       }
     });
@@ -209,7 +215,21 @@ app.delete('/api/recordings/:id', (req, res) => {
   });
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../frontend/build')));
+  
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+  });
+}
+
 // Start server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`Server running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
 });
