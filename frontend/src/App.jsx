@@ -1,8 +1,12 @@
-// App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import RecordScreen from './components/RecordScreen';
 import RecordingsList from './components/RecordingsList';
 import './App.css';
+
+// Determine API URL based on environment
+const API_URL = process.env.NODE_ENV === 'production' 
+  ? window.location.origin 
+  : 'http://localhost:5000';
 
 function App() {
   const [activeTab, setActiveTab] = useState('record');
@@ -40,7 +44,7 @@ function App() {
 
         {/* Main Content */}
         <main>
-          {activeTab === 'record' ? <RecordScreen /> : <RecordingsList />}
+          {activeTab === 'record' ? <RecordScreen apiUrl={API_URL} /> : <RecordingsList apiUrl={API_URL} />}
         </main>
 
         {/* Footer */}
