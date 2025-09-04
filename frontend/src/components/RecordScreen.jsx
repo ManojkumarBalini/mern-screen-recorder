@@ -1,13 +1,13 @@
-// RecordScreen.jsx
 import React, { useState, useRef } from 'react';
 
-const RecordScreen = () => {
+const RecordScreen = ({ apiUrl }) => {
   const [recording, setRecording] = useState(false);
   const [recordedVideo, setRecordedVideo] = useState(null);
   const [recordingTime, setRecordingTime] = useState(180);
   const [includeAudio, setIncludeAudio] = useState(true);
   const [timer, setTimer] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
   
   const mediaRecorderRef = useRef(null);
   const videoRef = useRef(null);
@@ -53,7 +53,7 @@ const RecordScreen = () => {
       mediaRecorderRef.current.onstop = () => {
         const blob = new Blob(chunks, { type: 'video/webm' });
         const videoUrl = URL.createObjectURL(blob);
-        setRecordedVideo({ blob, url: videoUrl });
+        setRecordedVideo({ blob, url: videoUrl, duration: timer });
         
         // Reset timer and progress
         clearInterval(timerRef.current);
@@ -113,22 +113,25 @@ const RecordScreen = () => {
     if (!recordedVideo) return;
     
     try {
+      setUploadStatus('Uploading...');
       const formData = new FormData();
       formData.append('video', recordedVideo.blob, `recording-${Date.now()}.webm`);
+      formData.append('duration', recordedVideo.duration.toString());
       
-      const response = await fetch('http://localhost:5000/api/recordings', {
+      const response = await fetch(`${apiUrl}/api/recordings`, {
         method: 'POST',
         body: formData
       });
       
       if (response.ok) {
-        alert('Recording uploaded successfully!');
+        setUploadStatus('Upload successful!');
+        setTimeout(() => setUploadStatus(''), 3000);
       } else {
-        alert('Failed to upload recording.');
+        setUploadStatus('Upload failed. Please try again.');
       }
     } catch (error) {
       console.error('Error uploading recording:', error);
-      alert('Error uploading recording.');
+      setUploadStatus('Error uploading recording.');
     }
   };
 
@@ -264,7 +267,7 @@ const RecordScreen = () => {
           )}
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4 mb-4">
           <button 
             onClick={downloadRecording}
             disabled={!recordedVideo}
@@ -288,6 +291,16 @@ const RecordScreen = () => {
             <i className="fas fa-cloud-upload-alt mr-2"></i> Upload
           </button>
         </div>
+
+        {uploadStatus && (
+          <div className={`text-center py-2 px-4 rounded-lg ${
+            uploadStatus.includes('successful') 
+              ? 'bg-green-900 text-green-200' 
+              : 'bg-blue-900 text-blue-200'
+          }`}>
+            {uploadStatus}
+          </div>
+        )}
         
         {/* Instructions */}
         <div className="mt-8 pt-6 border-t border-gray-700">
