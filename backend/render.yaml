@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: mern-screen-recorder-backend
+    env: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: https://mern-screen-recorder-frontend.onrender.com
