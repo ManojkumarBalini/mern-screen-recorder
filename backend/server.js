@@ -18,8 +18,11 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
+// Ensure uploads directory exists - use /tmp directory on Render for persistence
+const uploadsDir = process.env.NODE_ENV === 'production' 
+  ? '/tmp/uploads' 
+  : path.join(__dirname, 'uploads');
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -48,11 +51,9 @@ const dbPath = process.env.NODE_ENV === 'production'
   : path.join(__dirname, 'database.db');
 
 // Ensure directory exists
-if (process.env.NODE_ENV === 'production') {
-  const tmpDir = path.dirname(dbPath);
-  if (!fs.existsSync(tmpDir)) {
-    fs.mkdirSync(tmpDir, { recursive: true });
-  }
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
 }
 
 // Initialize database
@@ -127,7 +128,7 @@ app.get('/api/recordings/:id', (req, res) => {
       return res.status(404).json({ error: 'Recording not found' });
     }
     
-    const filePath = path.join(__dirname, row.filepath);
+    const filePath = row.filepath;
     
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Video file not found' });
@@ -177,7 +178,7 @@ app.get('/api/recordings/:id/download', (req, res) => {
       return res.status(404).json({ error: 'Recording not found' });
     }
     
-    const filePath = path.join(__dirname, row.filepath);
+    const filePath = row.filepath;
     
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Video file not found' });
@@ -201,7 +202,7 @@ app.delete('/api/recordings/:id', (req, res) => {
       return res.status(404).json({ error: 'Recording not found' });
     }
     
-    const filePath = path.join(__dirname, row.filepath);
+    const filePath = row.filepath;
     
     // Delete file from filesystem
     if (fs.existsSync(filePath)) {
@@ -224,10 +225,9 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Remove static file serving for frontend since we're deploying separately
-// In production, we're using separate services for frontend and backend
-
 // Start server
 app.listen(port, () => {
   console.log(`Server running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
+  console.log(`Uploads directory: ${uploadsDir}`);
+  console.log(`Database path: ${dbPath}`);
 });
