@@ -21,7 +21,7 @@ app.use(express.json());
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
 // Configure multer for file uploads
@@ -46,6 +46,14 @@ const upload = multer({
 const dbPath = process.env.NODE_ENV === 'production' 
   ? '/data/database.db' 
   : path.join(__dirname, 'database.db');
+
+// Ensure data directory exists in production
+if (process.env.NODE_ENV === 'production') {
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+}
 
 const db = new sqlite3.Database(dbPath);
 
@@ -222,8 +230,10 @@ app.get('/health', (req, res) => {
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
+  // Serve frontend build files
   app.use(express.static(path.join(__dirname, '../frontend/build')));
   
+  // Handle React routing, return all requests to React app
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
   });
