@@ -1,10 +1,19 @@
 const express = require('express');
 const multer = require('multer');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+
+// Use better-sqlite3 instead of sqlite3 for Render compatibility
+let Database;
+try {
+  // Try to use better-sqlite3 which works better on Render
+  Database = require('better-sqlite3');
+} catch (error) {
+  console.warn('better-sqlite3 not available, falling back to sqlite3');
+  Database = require('sqlite3').Database;
+}
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -44,21 +53,58 @@ const upload = multer({
 
 // Initialize SQLite database
 const dbPath = process.env.NODE_ENV === 'production' 
-  ? '/data/database.db' 
+  ? '/tmp/database.db'  // Use /tmp directory on Render
   : path.join(__dirname, 'database.db');
 
-// Ensure data directory exists in production
+// Ensure directory exists
 if (process.env.NODE_ENV === 'production') {
-  const dataDir = path.dirname(dbPath);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  const tmpDir = path.dirname(dbPath);
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir, { recursive: true });
   }
 }
 
-const db = new sqlite3.Database(dbPath);
-
-// Create recordings table if it doesn't exist
-db.serialize(() => {
+// Initialize database
+let db;
+try {
+  if (Database.name === 'Database') {
+    // Using better-sqlite3
+    db = new Database(dbPath);
+  } else {
+    // Using sqlite3
+    db = new Database(dbPath);
+  }
+  
+  // Create recordings table if it doesn't exist
+  if (Database.name === 'Database') {
+    // better-sqlite3 syntax
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS recordings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        filesize INTEGER NOT NULL,
+        duration INTEGER,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+  } else {
+    // sqlite3 syntax
+    db.run(`
+      CREATE TABLE IF NOT EXISTS recordings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        filesize INTEGER NOT NULL,
+        duration INTEGER,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  }
+} catch (error) {
+  console.error('Database initialization error:', error);
+  // Fallback to in-memory database if file-based fails
+  db = new (require('sqlite3').Database)(':memory:');
   db.run(`
     CREATE TABLE IF NOT EXISTS recordings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,10 +115,74 @@ db.serialize(() => {
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-});
+}
+
+// Helper function for database operations
+const dbRun = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    if (Database.name === 'Database') {
+      // better-sqlite3
+      try {
+        const stmt = db.prepare(query);
+        const result = stmt.run(...params);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    } else {
+      // sqlite3
+      db.run(query, params, function(err) {
+        if (err) reject(err);
+        else resolve(this);
+      });
+    }
+  });
+};
+
+const dbAll = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    if (Database.name === 'Database') {
+      // better-sqlite3
+      try {
+        const stmt = db.prepare(query);
+        const result = stmt.all(...params);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    } else {
+      // sqlite3
+      db.all(query, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    }
+  });
+};
+
+const dbGet = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    if (Database.name === 'Database') {
+      // better-sqlite3
+      try {
+        const stmt = db.prepare(query);
+        const result = stmt.get(...params);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    } else {
+      // sqlite3
+      db.get(query, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    }
+  });
+};
 
 // Routes
-app.post('/api/recordings', upload.single('video'), (req, res) => {
+app.post('/api/recordings', upload.single('video'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file provided' });
   }
@@ -80,22 +190,17 @@ app.post('/api/recordings', upload.single('video'), (req, res) => {
   const { filename, path: filepath, size } = req.file;
   const { duration } = req.body;
   
-  // Save to database
-  const stmt = db.prepare(`
-    INSERT INTO recordings (filename, filepath, filesize, duration) 
-    VALUES (?, ?, ?, ?)
-  `);
-  
-  stmt.run(filename, filepath, size, duration, function(err) {
-    if (err) {
-      console.error('Error saving recording to database:', err);
-      return res.status(500).json({ error: 'Failed to save recording' });
-    }
+  try {
+    // Save to database
+    const result = await dbRun(
+      `INSERT INTO recordings (filename, filepath, filesize, duration) VALUES (?, ?, ?, ?)`,
+      [filename, filepath, size, duration]
+    );
     
     res.status(201).json({
       message: 'Recording uploaded successfully',
       recording: {
-        id: this.lastID,
+        id: result.lastInsertRowid,
         filename,
         filepath,
         filesize: size,
@@ -103,30 +208,27 @@ app.post('/api/recordings', upload.single('video'), (req, res) => {
         createdAt: new Date().toISOString()
       }
     });
-  });
-  
-  stmt.finalize();
+  } catch (err) {
+    console.error('Error saving recording to database:', err);
+    res.status(500).json({ error: 'Failed to save recording' });
+  }
 });
 
-app.get('/api/recordings', (req, res) => {
-  db.all('SELECT * FROM recordings ORDER BY createdAt DESC', (err, rows) => {
-    if (err) {
-      console.error('Error fetching recordings:', err);
-      return res.status(500).json({ error: 'Failed to fetch recordings' });
-    }
-    
+app.get('/api/recordings', async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT * FROM recordings ORDER BY createdAt DESC');
     res.json(rows);
-  });
+  } catch (err) {
+    console.error('Error fetching recordings:', err);
+    res.status(500).json({ error: 'Failed to fetch recordings' });
+  }
 });
 
-app.get('/api/recordings/:id', (req, res) => {
+app.get('/api/recordings/:id', async (req, res) => {
   const { id } = req.params;
   
-  db.get('SELECT * FROM recordings WHERE id = ?', [id], (err, row) => {
-    if (err) {
-      console.error('Error fetching recording:', err);
-      return res.status(500).json({ error: 'Failed to fetch recording' });
-    }
+  try {
+    const row = await dbGet('SELECT * FROM recordings WHERE id = ?', [id]);
     
     if (!row) {
       return res.status(404).json({ error: 'Recording not found' });
@@ -165,17 +267,17 @@ app.get('/api/recordings/:id', (req, res) => {
       res.writeHead(200, head);
       fs.createReadStream(filePath).pipe(res);
     }
-  });
+  } catch (err) {
+    console.error('Error fetching recording:', err);
+    res.status(500).json({ error: 'Failed to fetch recording' });
+  }
 });
 
-app.get('/api/recordings/:id/download', (req, res) => {
+app.get('/api/recordings/:id/download', async (req, res) => {
   const { id } = req.params;
   
-  db.get('SELECT * FROM recordings WHERE id = ?', [id], (err, row) => {
-    if (err) {
-      console.error('Error fetching recording:', err);
-      return res.status(500).json({ error: 'Failed to fetch recording' });
-    }
+  try {
+    const row = await dbGet('SELECT * FROM recordings WHERE id = ?', [id]);
     
     if (!row) {
       return res.status(404).json({ error: 'Recording not found' });
@@ -188,17 +290,17 @@ app.get('/api/recordings/:id/download', (req, res) => {
     }
     
     res.download(filePath, row.filename);
-  });
+  } catch (err) {
+    console.error('Error fetching recording:', err);
+    res.status(500).json({ error: 'Failed to fetch recording' });
+  }
 });
 
-app.delete('/api/recordings/:id', (req, res) => {
+app.delete('/api/recordings/:id', async (req, res) => {
   const { id } = req.params;
   
-  db.get('SELECT * FROM recordings WHERE id = ?', [id], (err, row) => {
-    if (err) {
-      console.error('Error fetching recording:', err);
-      return res.status(500).json({ error: 'Failed to fetch recording' });
-    }
+  try {
+    const row = await dbGet('SELECT * FROM recordings WHERE id = ?', [id]);
     
     if (!row) {
       return res.status(404).json({ error: 'Recording not found' });
@@ -212,15 +314,13 @@ app.delete('/api/recordings/:id', (req, res) => {
     }
     
     // Delete from database
-    db.run('DELETE FROM recordings WHERE id = ?', [id], function(err) {
-      if (err) {
-        console.error('Error deleting recording:', err);
-        return res.status(500).json({ error: 'Failed to delete recording' });
-      }
-      
-      res.json({ message: 'Recording deleted successfully' });
-    });
-  });
+    await dbRun('DELETE FROM recordings WHERE id = ?', [id]);
+    
+    res.json({ message: 'Recording deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting recording:', err);
+    res.status(500).json({ error: 'Failed to delete recording' });
+  }
 });
 
 // Health check endpoint
