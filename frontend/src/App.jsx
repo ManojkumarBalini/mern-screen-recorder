@@ -5,7 +5,7 @@ import './App.css';
 
 // Determine API URL based on environment
 const API_URL = process.env.NODE_ENV === 'production' 
-  ? window.location.origin 
+  ? 'https://mern-screen-recorder-backend-6cgg.onrender.com' 
   : 'http://localhost:5000';
 
 function App() {
