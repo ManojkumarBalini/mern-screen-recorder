@@ -127,11 +127,12 @@ const RecordScreen = ({ apiUrl }) => {
         setUploadStatus('Upload successful!');
         setTimeout(() => setUploadStatus(''), 3000);
       } else {
-        setUploadStatus('Upload failed. Please try again.');
+        const errorData = await response.json();
+        setUploadStatus(`Upload failed: ${errorData.error || 'Please try again.'}`);
       }
     } catch (error) {
       console.error('Error uploading recording:', error);
-      setUploadStatus('Error uploading recording.');
+      setUploadStatus('Error uploading recording. Please check your connection.');
     }
   };
 
@@ -296,7 +297,9 @@ const RecordScreen = ({ apiUrl }) => {
           <div className={`text-center py-2 px-4 rounded-lg ${
             uploadStatus.includes('successful') 
               ? 'bg-green-900 text-green-200' 
-              : 'bg-blue-900 text-blue-200'
+              : uploadStatus.includes('Error') || uploadStatus.includes('failed')
+                ? 'bg-red-900 text-red-200'
+                : 'bg-blue-900 text-blue-200'
           }`}>
             {uploadStatus}
           </div>
